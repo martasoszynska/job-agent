@@ -20,23 +20,40 @@ the results to an Excel file - fully automated via GitHub Actions.
 6. **`.github/workflows/weekly.yml`** - the schedule. GitHub runs this for you
    every Monday, on their servers, whether or not your laptop is on.
 
-## This was written without live internet access to the job sites
+## Sources currently in rotation
 
-Important: `agent/sources.py` was written in a sandboxed environment that
-could reach GitHub and package registries, but not the actual job sites. That
-means:
-- The ReliefWeb fetcher uses their real public API and is probably close to
-  right, but hasn't been run against live data.
-- The UN Talent (untalent.org) fetcher scrapes HTML with placeholder
-  selectors that almost certainly need adjusting once you can see the real
-  page structure.
-- jobup.ch, Devex, and IUCN don't have fetchers yet at all - `fetch_all()` has
-  a TODO marking where to add them.
+Verified against live data (real API or real scrape, tested and fixed
+together in Claude Code): ReliefWeb, UN Talent (untalent.org), jobup.ch,
+IUCN, Impactpool, JournalismJobs.com, The Communications Network
+(comnetwork.org), UNHCR, IOM, UNEP, plus an optional general web-search
+fallback (Brave Search API) for anything outside this fixed list.
 
-**This is exactly the work to do next in Claude Code**, which has full
-internet access and can run the script, show you the real errors, and fix
-them with you - a much better way to learn what's actually happening than
-reading finished code.
+Two of these need a one-time setup step before they'll return anything (see
+below): ReliefWeb requires a pre-approved `appname`, and the web-search
+fallback requires your own Brave Search API key. Every other source works
+with no extra setup.
+
+Only a low-relevance-word overlap or a listing scoring below 0.4 against your
+profile gets filtered out automatically - nothing needs an API key beyond
+what's listed below to start returning real results.
+
+### Sources deliberately left out
+
+- **LinkedIn** - job pages require a logged-in session; not fetchable at all.
+- **Devex** - blocked by DataDome bot-detection (returns a CAPTCHA challenge
+  to any automated request, including its RSS feed). Use Devex's own email
+  job alerts instead.
+- **Idealist, MediaBistro, EU Careers portal** - client-rendered SPAs with no
+  discoverable API, or (EU Careers) no unified list at all.
+- **ProductionHub, Poynter, Muck Rack** - blocked by a Cloudflare challenge.
+- **WHO, FAO** - Oracle Taleo behind session/JSF-gated AJAX (WHO also has a
+  SAML login wall); would need a full headless browser, not just requests.
+- **Editor & Publisher (mediajobboard.com)** - technically scrapeable, but
+  its `robots.txt` disallows generic crawlers, so it's skipped out of
+  respect for that policy rather than because it's technically infeasible.
+
+Full detail and evidence for each of these lives in the docstring of
+`fetch_all()` in `agent/sources.py`.
 
 ## Setup steps (do these in Claude Code / on GitHub)
 
@@ -47,23 +64,35 @@ reading finished code.
    small - a few cents per run, not dollars).
 3. In your GitHub repo: Settings -> Secrets and variables -> Actions -> New
    repository secret. Name it `ANTHROPIC_API_KEY`, paste in your key.
-4. Test it locally first: `pip install -r requirements.txt`, set
-   `ANTHROPIC_API_KEY` in your terminal environment, run
-   `python agent/main.py`, see what breaks, fix it.
-5. Once it runs cleanly locally, push to GitHub. The workflow will fire
+4. Optional, to enable ReliefWeb: request an approved `appname` at
+   https://apidoc.reliefweb.int/parameters#appname (a short form, approved by
+   email) and add it as a second repository secret, `RELIEFWEB_APPNAME`.
+5. Optional, to enable the general web-search fallback: get a free-tier key
+   at https://api-dashboard.search.brave.com and add it as a third repository
+   secret, `BRAVE_API_KEY`. Without it, this source is skipped automatically
+   (same as ReliefWeb without its appname) - everything else still runs.
+6. Test it locally first: `pip install -r requirements.txt`, set
+   `ANTHROPIC_API_KEY` (and the optional ones above) in your terminal
+   environment, run `python agent/main.py`, see what breaks, fix it.
+7. Once it runs cleanly locally, push to GitHub. The workflow will fire
    automatically every Monday at 07:00 UTC (edit the cron line in
    `weekly.yml` to change the schedule), or you can trigger it manually from
    the repo's "Actions" tab any time via "Run workflow."
-6. Each run commits the updated `state.json` and `This_Weeks_Picks.xlsx`
+8. Each run commits the updated `state.json` and `This_Weeks_Picks.xlsx`
    straight back to the repo, so you always have the latest file plus a full
    history of what's been found over time.
 
 ## Known limitations to design around together
 
-- No LinkedIn source - LinkedIn blocks this kind of automated access, same as
-  discussed for the Chrome-based approach.
 - Scrapers (as opposed to real APIs) will occasionally break when a site
   redesigns its page - expect to revisit `sources.py` every so often.
 - The Claude-scoring step assumes the model returns clean JSON; `score.py`
   has a fallback for when it doesn't, but keep an eye on how often that
   triggers.
+- Listings scoring below 0.4 aren't remembered in `state.json`, only shown
+  ones are - so a low-scoring listing gets re-fetched and re-scored (costing
+  a small API call) every week it's still posted, rather than being
+  permanently skipped after the first pass.
+- The web-search fallback (Brave Search API) returns arbitrary web pages, not
+  verified job postings the way the other sources are - expect noisier,
+  lower-precision results from that source specifically.
