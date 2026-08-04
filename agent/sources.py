@@ -63,17 +63,21 @@ def fetch_reliefweb(keywords: list[str]) -> list[dict]:
     return results
 
 
-def _significant_words(phrases: list[str]) -> set[str]:
-    """Splits multi-word target titles into individual words for a looser,
-    keyword-level pre-filter (e.g. "Multimedia Producer" -> {"multimedia",
-    "producer"}). Casts a wider net than exact-phrase matching since Claude's
-    scoring step filters out the false positives afterward anyway."""
-    words = set()
-    for phrase in phrases:
-        for word in phrase.split():
-            if len(word) > 2:
-                words.add(word.lower())
-    return words
+def _matches_target_titles(title: str, target_titles: list[str], min_overlap: int = 2) -> bool:
+    """
+    A listing counts as a candidate only if its title shares at least
+    min_overlap significant words with the SAME target title phrase - not
+    just any single word from the combined pool across all target titles.
+    A single generic overlap (e.g. "Officer") on its own is not enough;
+    requiring 2 shared words filters that out while still catching real
+    matches like "Senior Video Producer" against "Video Producer".
+    """
+    title_words = set(re.findall(r"[a-z]+", title.lower()))
+    for phrase in target_titles:
+        phrase_words = {w for w in re.findall(r"[a-z]+", phrase.lower()) if len(w) > 2}
+        if len(phrase_words & title_words) >= min_overlap:
+            return True
+    return False
 
 
 def fetch_untalent(keywords: list[str]) -> list[dict]:
@@ -88,7 +92,6 @@ def fetch_untalent(keywords: list[str]) -> list[dict]:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    words = _significant_words(keywords)
     results = []
     for card in soup.select("div.job-card"):
         title_link = card.select_one(".job-title h1 a")
@@ -96,8 +99,7 @@ def fetch_untalent(keywords: list[str]) -> list[dict]:
             continue
         title = title_link.get_text(strip=True)
         href = title_link.get("href", "")
-        title_words = set(re.findall(r"[a-z]+", title.lower()))
-        if words & title_words:
+        if _matches_target_titles(title, keywords):
             org_links = card.select(".organisation a")
             organization = next(
                 (a.get_text(strip=True) for a in org_links if a.get_text(strip=True)),
@@ -141,9 +143,16 @@ def fetch_jobup(keywords: list[str]) -> list[dict]:
         for doc in resp.json().get("documents", []):
             if doc["id"] in seen_ids:
                 continue
+            title = doc.get("title") or ""
+            if not _matches_target_titles(title, keywords):
+                # jobup's own relevance ranking is fuzzy enough to surface
+                # unrelated "Officer"/"Manager" roles on a single shared word -
+                # apply the same local filter as the scraped sources instead
+                # of trusting it entirely.
+                continue
             seen_ids.add(doc["id"])
             results.append({
-                "title": doc.get("title"),
+                "title": title,
                 "url": f"https://www.jobup.ch/en/jobs/detail/{doc['id']}/",
                 "posted_date": doc.get("publicationDate"),
                 "deadline": None,  # jobup.ch's search API doesn't expose a closing date
@@ -166,12 +175,10 @@ def fetch_iucn(keywords: list[str]) -> list[dict]:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    words = _significant_words(keywords)
     results = []
     for link in soup.select('a[href*="event=vac.show&vacId"]'):
         title = link.contents[0].strip() if link.contents else link.get_text(strip=True)
-        title_words = set(re.findall(r"[a-z]+", title.lower()))
-        if not (words & title_words):
+        if not _matches_target_titles(title, keywords):
             continue
         row = link.find_parent("tr")
         org_cell = link.find_parent("td")
