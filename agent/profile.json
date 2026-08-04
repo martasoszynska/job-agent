@@ -1,0 +1,20 @@
+{
+  "target_titles": [
+    "Multimedia Producer", "Video Producer", "Multimedia Journalist",
+    "Content Producer", "Impact Producer", "Communications Officer",
+    "Public Information Officer", "Audiovisual Producer"
+  ],
+  "seniority": "mid-level",
+  "exclude_terms": ["intern", "internship", "junior", "entry-level", "entry level"],
+  "priority_locations": ["Remote", "Geneva", "Switzerland", "Brussels", "Berlin", "Poland"],
+  "secondary_locations": ["Europe"],
+  "stretch_locations": ["Ottawa", "Montreal", "Senegal", "Kenya", "South Africa", "Mexico City", "Colombia", "Brazil", "Bangkok"],
+  "excluded_contract_types": ["UN consultancy based in Switzerland"],
+  "languages": ["English", "French", "Spanish", "Polish", "German (B1)"],
+  "citizenship": "Polish (EU/EEA) - no sponsorship needed in EU/EEA",
+  "core_skills": [
+    "video production and editing", "Adobe Premiere", "Final Cut",
+    "social-first storytelling", "humanitarian/global affairs content",
+    "virtual press events", "freelancer/crew coordination"
+  ]
+}

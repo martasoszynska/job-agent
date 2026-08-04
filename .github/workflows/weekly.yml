@@ -1,0 +1,44 @@
+name: Weekly Job Search
+
+on:
+  schedule:
+    # Runs every Monday at 07:00 UTC. Adjust the cron time to suit you -
+    # crontab.guru is a handy reference for the syntax.
+    - cron: "0 7 * * 1"
+  workflow_dispatch: {}  # lets you also trigger it manually from the Actions tab
+
+jobs:
+  run-job-search:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed so the workflow can commit state.json back
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the job search agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python agent/main.py
+
+      - name: Commit updated state and output
+        run: |
+          git config user.name "job-search-agent"
+          git config user.email "actions@github.com"
+          git add agent/state.json This_Weeks_Picks.xlsx
+          git commit -m "Weekly job search run - $(date +'%Y-%m-%d')" || echo "Nothing to commit"
+          git push
+
+      - name: Upload output as an artifact too
+        uses: actions/upload-artifact@v4
+        with:
+          name: this-weeks-picks
+          path: This_Weeks_Picks.xlsx
