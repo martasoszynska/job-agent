@@ -4,6 +4,7 @@ Fetchers for each job source.
 
 import os
 import re
+from datetime import date, timedelta
 
 try:
     # Works around a TLS handshake failure some job APIs trigger on macOS's
@@ -56,6 +57,7 @@ def fetch_reliefweb(keywords: list[str]) -> list[dict]:
             "title": fields.get("title"),
             "url": fields.get("url"),
             "posted_date": fields.get("date", {}).get("created"),
+            "deadline": fields.get("date", {}).get("closing"),
             "source": organization,
         })
     return results
@@ -101,10 +103,19 @@ def fetch_untalent(keywords: list[str]) -> list[dict]:
                 (a.get_text(strip=True) for a in org_links if a.get_text(strip=True)),
                 "UN Talent",
             )
+            # The list page only gives a relative "N days left" countdown, not
+            # an absolute date - convert it so it's comparable across sources.
+            deadline = None
+            expiration = card.select_one(".expiration")
+            if expiration:
+                match = re.search(r"(\d+)\s*days?\s*left", expiration.get_text(strip=True))
+                if match:
+                    deadline = str(date.today() + timedelta(days=int(match.group(1))))
             results.append({
                 "title": title,
                 "url": href if href.startswith("http") else f"https://untalent.org{href}",
                 "posted_date": None,
+                "deadline": deadline,
                 "source": organization,
             })
     return results
@@ -135,6 +146,7 @@ def fetch_jobup(keywords: list[str]) -> list[dict]:
                 "title": doc.get("title"),
                 "url": f"https://www.jobup.ch/en/jobs/detail/{doc['id']}/",
                 "posted_date": doc.get("publicationDate"),
+                "deadline": None,  # jobup.ch's search API doesn't expose a closing date
                 "source": (doc.get("company") or {}).get("name") or "jobup.ch",
             })
     return results
@@ -168,11 +180,17 @@ def fetch_iucn(keywords: list[str]) -> list[dict]:
             lines = [t.strip() for t in org_cell.stripped_strings]
             if len(lines) >= 2:
                 organization = lines[-1]
+        deadline = None
+        if row:
+            cells = row.find_all("td")
+            if len(cells) >= 4:
+                deadline = cells[3].get_text(strip=True) or None
         href = link.get("href", "")
         results.append({
             "title": title,
             "url": f"https://hrms.iucn.org{href}" if href.startswith("/") else href,
             "posted_date": None,
+            "deadline": deadline,
             "source": organization,
         })
     return results

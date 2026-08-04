@@ -37,6 +37,21 @@ def dedupe(listings, state):
     return new_listings
 
 
+FINAL_HEADERS = [
+    "Date Found", "Title", "Organization/Source", "Deadline",
+    "Direct Link", "Match Score", "Notes", "Legal Work Flag",
+]
+COLUMN_WIDTHS = [12, 30, 20, 14, 45, 12, 55, 30]
+
+
+def _style_header(ws):
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
+    for col, width in zip("ABCDEFGH", COLUMN_WIDTHS):
+        ws.column_dimensions[col].width = width
+
+
 def _migrate_to_dated_schema(ws, state):
     """
     One-time migration for a workbook written before the Date Found column
@@ -50,11 +65,18 @@ def _migrate_to_dated_schema(ws, state):
     for row in range(2, ws.max_row + 1):
         url = ws.cell(row=row, column=4).value  # URL shifted from column C to D
         ws.cell(row=row, column=1, value=date_by_url.get(url, ""))
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
-    for col, width in zip("ABCDEFG", [12, 30, 20, 45, 12, 55, 30]):
-        ws.column_dimensions[col].width = width
+
+
+def _migrate_to_deadline_schema(ws):
+    """
+    One-time migration adding the Deadline column. Older listings were never
+    fetched with deadline data at all, so there's nothing to backfill -
+    existing rows are just left blank there, same as a source that doesn't
+    provide a deadline is handled going forward.
+    """
+    ws.insert_cols(4)  # URL (soon renamed Direct Link) shifts from D to E
+    ws.cell(row=1, column=4, value="Deadline")
+    ws.cell(row=1, column=5, value="Direct Link")
 
 
 def write_excel(scored_listings, state):
@@ -64,22 +86,20 @@ def write_excel(scored_listings, state):
     run's new ones. Safe from duplicates because scored_listings only ever
     contains listings dedupe() found weren't already in state.json.
     """
-    headers = ["Date Found", "Title", "Organization/Source", "URL", "Match Score", "Notes", "Legal Work Flag"]
     if OUTPUT_PATH.exists():
         wb = openpyxl.load_workbook(OUTPUT_PATH)
         ws = wb.active
         if ws.cell(row=1, column=1).value != "Date Found":
             _migrate_to_dated_schema(ws, state)
+        if ws.cell(row=1, column=4).value != "Deadline":
+            _migrate_to_deadline_schema(ws)
+        _style_header(ws)
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "All Picks"
-        ws.append(headers)
-        for cell in ws[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
-        for col, width in zip("ABCDEFG", [12, 30, 20, 45, 12, 55, 30]):
-            ws.column_dimensions[col].width = width
+        ws.append(FINAL_HEADERS)
+        _style_header(ws)
 
     today = str(date.today())
     for listing, score in scored_listings:
@@ -87,6 +107,7 @@ def write_excel(scored_listings, state):
             today,
             listing.get("title"),
             listing.get("source"),
+            listing.get("deadline"),
             listing.get("url"),
             score.get("match_score"),
             score.get("notes"),
@@ -106,9 +127,17 @@ def main():
     new_listings = dedupe(all_listings, state)
     print(f"{len(new_listings)} are new since last run.")
 
+    MATCH_THRESHOLD = 0.4
     scored = []
+    discarded = 0
     for listing in new_listings:
         score = score_listing(listing, profile)
+        match_score = score.get("match_score")
+        if match_score is None or match_score < MATCH_THRESHOLD:
+            # Below the bar (or unscoreable) - don't remember it, so it gets
+            # re-evaluated next run instead of being permanently discarded.
+            discarded += 1
+            continue
         scored.append((listing, score))
         state["seen_links"].append({
             "url": listing["url"],
@@ -119,7 +148,7 @@ def main():
 
     write_excel(scored, state)
     save_json(STATE_PATH, state)
-    print(f"Appended {len(scored)} new scored listings to {OUTPUT_PATH}")
+    print(f"Appended {len(scored)} new scored listings to {OUTPUT_PATH} ({discarded} below the {MATCH_THRESHOLD} match threshold, discarded)")
     print("Updated state.json - remember this needs to be committed back to the repo.")
 
 
